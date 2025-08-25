@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Arduino.h>
-#include <Wire.h>
+#include "driver/i2c_master.h"
+#include "esp_timer.h"
 
 class VL53L1X
 {
@@ -1268,12 +1268,12 @@ class VL53L1X
 
     RangingData ranging_data;
 
-    uint8_t last_status; // status of last I2C transmission
+    esp_err_t last_status; // status of last I2C transmission
 
     VL53L1X();
 
-    void setBus(TwoWire * bus) { this->bus = bus; }
-    TwoWire * getBus() { return bus; }
+    void setBus(i2c_master_bus_handle_t  * _i2cbus);
+    i2c_master_dev_handle_t  getBus() { return bus; }
 
     void setAddress(uint8_t new_addr);
     uint8_t getAddress() { return address; }
@@ -1358,13 +1358,14 @@ class VL53L1X
     // I2C buses)
     ResultBuffer results;
 
-    TwoWire * bus;
+    i2c_master_bus_handle_t  * i2cbus;
+    i2c_master_dev_handle_t  bus;
 
     uint8_t address;
 
-    uint16_t io_timeout;
+    uint32_t io_timeout;
     bool did_timeout;
-    uint16_t timeout_start_ms;
+    uint32_t timeout_start_ms;
 
     uint16_t fast_osc_frequency;
     uint16_t osc_calibrate_val;
@@ -1376,10 +1377,10 @@ class VL53L1X
     DistanceMode distance_mode;
 
     // Record the current time to check an upcoming timeout against
-    void startTimeout() { timeout_start_ms = millis(); }
+    void startTimeout() { timeout_start_ms = uint32_t(esp_timer_get_time()/1000); }
 
     // Check if timeout is enabled (set to nonzero value) and has expired
-    bool checkTimeoutExpired() {return (io_timeout > 0) && ((uint16_t)(millis() - timeout_start_ms) > io_timeout); }
+    bool checkTimeoutExpired() {return (io_timeout > 0) && ((uint32_t)((esp_timer_get_time()/1000) - timeout_start_ms) > io_timeout); }
 
     void setupManualCalibration();
     void readResults();

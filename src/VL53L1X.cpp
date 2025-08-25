@@ -3,16 +3,17 @@
 // or paraphrased from the API source code, API user manual (UM2356), and
 // VL53L1X datasheet.
 
-#include "VL53L1X.h"
+#include "include/VL53L1X.hpp"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp32/rom/ets_sys.h"
+#include "esp_log.h"
+
 
 // Constructors ////////////////////////////////////////////////////////////////
 
 VL53L1X::VL53L1X()
-#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_TWOWIRE)
-  : bus(&Wire)
-#else
   : bus(nullptr)
-#endif
   , address(AddressDefault)
   , io_timeout(0) // no timeout
   , did_timeout(false)
@@ -21,6 +22,18 @@ VL53L1X::VL53L1X()
   , saved_vhv_timeout(0)
   , distance_mode(Unknown)
 {
+  
+}
+
+void VL53L1X::setBus(i2c_master_bus_handle_t  * _i2cbus){
+  i2cbus = _i2cbus;
+  i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = address,
+            .scl_speed_hz = 400000,
+        };
+  i2c_master_bus_add_device(*i2cbus, &dev_cfg, &bus);
+
 }
 
 // Public Methods //////////////////////////////////////////////////////////////
@@ -43,12 +56,12 @@ bool VL53L1X::init(bool io_2v8)
   // VL53L1_software_reset() begin
 
   writeReg(SOFT_RESET, 0x00);
-  delayMicroseconds(100);
+  ets_delay_us(50); // 50 µs 待つ
   writeReg(SOFT_RESET, 0x01);
 
   // give it some time to boot; otherwise the sensor NACKs during the readReg()
   // call below and the Arduino 101 doesn't seem to handle that well
-  delay(1);
+  vTaskDelay(pdMS_TO_TICKS(1));
 
   // VL53L1_poll_for_boot_completion() begin
 
@@ -161,87 +174,116 @@ bool VL53L1X::init(bool io_2v8)
 // Write an 8-bit register
 void VL53L1X::writeReg(uint16_t reg, uint8_t value)
 {
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  bus->write(value);
-  last_status = bus->endTransmission();
+  uint8_t buf[3];
+  buf[0] = (uint8_t)(reg >> 8); // reg high byte
+  buf[1] = (uint8_t)(reg);      // reg low byte
+  buf[2] = value;
+
+  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
 }
 
 // Write a 16-bit register
 void VL53L1X::writeReg16Bit(uint16_t reg, uint16_t value)
 {
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  bus->write((uint8_t)(value >> 8)); // value high byte
-  bus->write((uint8_t)(value));      // value low byte
-  last_status = bus->endTransmission();
+  uint8_t buf[4];
+  buf[0] = (uint8_t)(reg >> 8); // reg high byte
+  buf[1] = (uint8_t)(reg);      // reg low byte
+  buf[2] = (uint8_t)(value >> 8);
+  buf[3] = (uint8_t)(value);
+
+  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
 }
 
 // Write a 32-bit register
 void VL53L1X::writeReg32Bit(uint16_t reg, uint32_t value)
 {
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  bus->write((uint8_t)(value >> 24)); // value highest byte
-  bus->write((uint8_t)(value >> 16));
-  bus->write((uint8_t)(value >>  8));
-  bus->write((uint8_t)(value));       // value lowest byte
-  last_status = bus->endTransmission();
+  uint8_t buf[6];
+  buf[0] = (uint8_t)(reg >> 8);   // reg high byte
+  buf[1] = (uint8_t)(reg);        // reg low byte
+  buf[2] = (uint8_t)(value >> 24);
+  buf[3] = (uint8_t)(value >> 16);
+  buf[4] = (uint8_t)(value >> 8);
+  buf[5] = (uint8_t)(value);
+  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
+
 }
 
 // Read an 8-bit register
 uint8_t VL53L1X::readReg(regAddr reg)
 {
-  uint8_t value;
+  uint8_t reg_buf[2];
+  reg_buf[0] = (uint8_t)(reg >> 8); // reg high byte
+  reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  last_status = bus->endTransmission();
+    // レジスタアドレス送信
+    esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    last_status = err;
+    if (err != ESP_OK) {
+        return 0; // 失敗時は0を返す（必要ならエラー処理）
+    }
 
-  bus->requestFrom(address, (uint8_t)1);
-  value = bus->read();
+    // データ受信（1バイト）
+    uint8_t value = 0;
+    err = i2c_master_receive(bus, &value, 1, pdMS_TO_TICKS(1000));
+    last_status = err;
 
-  return value;
+    return value;
 }
 
 // Read a 16-bit register
 uint16_t VL53L1X::readReg16Bit(uint16_t reg)
 {
-  uint16_t value;
+    uint8_t reg_buf[2];
+    reg_buf[0] = (uint8_t)(reg >> 8); // reg high byte
+    reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  last_status = bus->endTransmission();
+    // レジスタアドレス送信
+    esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    last_status = err;
+    if (err != ESP_OK) {
+        return 0; // 失敗時は0を返す（必要ならエラー処理）
+    }
 
-  bus->requestFrom(address, (uint8_t)2);
-  value  = (uint16_t)bus->read() << 8; // value high byte
-  value |=           bus->read();      // value low byte
+    // データ受信（2バイト）
+    uint8_t data[2] = {0};
+    err = i2c_master_receive(bus, data, 2, pdMS_TO_TICKS(1000));
+    last_status = err;
+    if (err != ESP_OK) {
+        return 0;
+    }
 
-  return value;
+    // 上位 → 下位の順で結合
+    uint16_t value = ((uint16_t)data[0] << 8) | data[1];
+
+    return value;
 }
 
 // Read a 32-bit register
 uint32_t VL53L1X::readReg32Bit(uint16_t reg)
 {
-  uint32_t value;
+  uint8_t reg_buf[2];
+  reg_buf[0] = (uint8_t)(reg >> 8); // reg high byte
+  reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(reg >> 8)); // reg high byte
-  bus->write((uint8_t)(reg));      // reg low byte
-  last_status = bus->endTransmission();
+    // レジスタアドレス送信
+  esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+  last_status = err;
+  if (err != ESP_OK) {
+        return 0; // 失敗時は0を返す（必要ならエラー処理）
+  }
 
-  bus->requestFrom(address, (uint8_t)4);
-  value  = (uint32_t)bus->read() << 24; // value highest byte
-  value |= (uint32_t)bus->read() << 16;
-  value |= (uint16_t)bus->read() <<  8;
-  value |=           bus->read();       // value lowest byte
+    // データ受信（2バイト）
+  uint8_t data[4] = {0};
+  err = i2c_master_receive(bus, data, 4, pdMS_TO_TICKS(1000));
+  last_status = err;
+  if (err != ESP_OK) {
+        return 0;
+  }
 
-  return value;
+    // 上位 → 下位の順で結合
+  uint16_t value = ((uint32_t)data[0] << 24) |  ((uint32_t)data[1] << 16) |  ((uint32_t)data[2] << 8) | data[3];
+
+    return value;
 }
 
 // set distance mode to Short, Medium, or Long
@@ -666,39 +708,52 @@ void VL53L1X::setupManualCalibration()
 // read measurement results into buffer
 void VL53L1X::readResults()
 {
-  bus->beginTransmission(address);
-  bus->write((uint8_t)(RESULT__RANGE_STATUS >> 8)); // reg high byte
-  bus->write((uint8_t)(RESULT__RANGE_STATUS));      // reg low byte
-  last_status = bus->endTransmission();
+    esp_err_t err;
 
-  bus->requestFrom(address, (uint8_t)17);
+    // レジスタアドレス (RESULT__RANGE_STATUS = 0x0089)
+    uint8_t reg_buf[2];
+    reg_buf[0] = (uint8_t)(RESULT__RANGE_STATUS >> 8); // high byte
+    reg_buf[1] = (uint8_t)(RESULT__RANGE_STATUS);      // low byte
 
-  results.range_status = bus->read();
+    // まずレジスタアドレスを送信
+    err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    last_status = err;
+    if (err != ESP_OK) {
+        ESP_LOGE("VL53L1X", "Failed to write reg addr: %s", esp_err_to_name(err));
+        return;
+    }
 
-  bus->read(); // report_status: not used
+    // 17バイト受信
+    uint8_t data[17];
+    err = i2c_master_receive(bus, data, sizeof(data), pdMS_TO_TICKS(1000));
+    last_status = err;
+    if (err != ESP_OK) {
+        ESP_LOGE("VL53L1X", "Failed to read result data: %s", esp_err_to_name(err));
+        return;
+    }
 
-  results.stream_count = bus->read();
+    // デコード (Arduino版と同じ順序)
+    results.range_status = data[0];
+    // data[1] = report_status (未使用)
 
-  results.dss_actual_effective_spads_sd0  = (uint16_t)bus->read() << 8; // high byte
-  results.dss_actual_effective_spads_sd0 |=           bus->read();      // low byte
+    results.stream_count = data[2];
 
-  bus->read(); // peak_signal_count_rate_mcps_sd0: not used
-  bus->read();
+    results.dss_actual_effective_spads_sd0  = (uint16_t)data[3] << 8;
+    results.dss_actual_effective_spads_sd0 |= (uint16_t)data[4];
 
-  results.ambient_count_rate_mcps_sd0  = (uint16_t)bus->read() << 8; // high byte
-  results.ambient_count_rate_mcps_sd0 |=           bus->read();      // low byte
+    // data[5..6] = peak_signal_count_rate_mcps_sd0 (未使用)
 
-  bus->read(); // sigma_sd0: not used
-  bus->read();
+    results.ambient_count_rate_mcps_sd0  = (uint16_t)data[7] << 8;
+    results.ambient_count_rate_mcps_sd0 |= (uint16_t)data[8];
 
-  bus->read(); // phase_sd0: not used
-  bus->read();
+    // data[9..10]  = sigma_sd0 (未使用)
+    // data[11..12] = phase_sd0 (未使用)
 
-  results.final_crosstalk_corrected_range_mm_sd0  = (uint16_t)bus->read() << 8; // high byte
-  results.final_crosstalk_corrected_range_mm_sd0 |=           bus->read();      // low byte
+    results.final_crosstalk_corrected_range_mm_sd0  = (uint16_t)data[13] << 8;
+    results.final_crosstalk_corrected_range_mm_sd0 |= (uint16_t)data[14];
 
-  results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0  = (uint16_t)bus->read() << 8; // high byte
-  results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0 |=           bus->read();      // low byte
+    results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0  = (uint16_t)data[15] << 8;
+    results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0 |= (uint16_t)data[16];
 }
 
 // perform Dynamic SPAD Selection calculation/update
