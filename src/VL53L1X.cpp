@@ -42,6 +42,13 @@ void VL53L1X::setAddress(uint8_t new_addr)
 {
   writeReg(I2C_SLAVE__DEVICE_ADDRESS, new_addr & 0x7F);
   address = new_addr;
+  i2c_master_bus_rm_device(bus);
+  i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = address,
+            .scl_speed_hz = 400000,
+        };
+  i2c_master_bus_add_device(*i2cbus, &dev_cfg, &bus);
 }
 
 // Initialize sensor using settings taken mostly from VL53L1_DataInit() and
