@@ -1,6 +1,6 @@
 #pragma once
 
-#include "driver/i2c_master.h"
+#include "driver/i2c.h"
 #include "esp_timer.h"
 
 class VL53L1X
@@ -1272,8 +1272,8 @@ class VL53L1X
 
     VL53L1X();
 
-    void setBus(i2c_master_bus_handle_t  * _i2cbus);
-    i2c_master_dev_handle_t  getBus() { return bus; }
+    void setBus(i2c_port_t _port);
+    i2c_port_t  getBus() { return port; }
 
     void setAddress(uint8_t new_addr);
     uint8_t getAddress() { return address; }
@@ -1358,9 +1358,7 @@ class VL53L1X
     // I2C buses)
     ResultBuffer results;
 
-    i2c_master_bus_handle_t  * i2cbus;
-    i2c_master_dev_handle_t  bus;
-
+    i2c_port_t port;
     uint8_t address;
 
     uint32_t io_timeout;

@@ -13,7 +13,7 @@
 // Constructors ////////////////////////////////////////////////////////////////
 
 VL53L1X::VL53L1X()
-  : bus(nullptr)
+  : port(I2C_NUM_0)
   , address(AddressDefault)
   , io_timeout(0) // no timeout
   , did_timeout(false)
@@ -24,23 +24,15 @@ VL53L1X::VL53L1X()
 {
   
 }
-
-void VL53L1X::setBus(i2c_master_bus_handle_t  * _i2cbus){
-  i2cbus = _i2cbus;
-  i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = address,
-            .scl_speed_hz = 400000,
-        };
-  i2c_master_bus_add_device(*i2cbus, &dev_cfg, &bus);
-
+void VL53L1X::setBus(i2c_port_t  _port){
+  port = _port;
 }
 
 // Public Methods //////////////////////////////////////////////////////////////
 
 void VL53L1X::setAddress(uint8_t new_addr)
 {
-  writeReg(I2C_SLAVE__DEVICE_ADDRESS, new_addr & 0x7F);
+  writeReg(I2C_SLAVE__DEVICE_ADDRESS,new_addr&0x7F);
   address = new_addr;
 }
 
@@ -178,8 +170,7 @@ void VL53L1X::writeReg(uint16_t reg, uint8_t value)
   buf[0] = (uint8_t)(reg >> 8); // reg high byte
   buf[1] = (uint8_t)(reg);      // reg low byte
   buf[2] = value;
-
-  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
+  i2c_master_write_to_device(port,address, buf, sizeof(buf), pdMS_TO_TICKS(1000));
 }
 
 // Write a 16-bit register
@@ -191,7 +182,7 @@ void VL53L1X::writeReg16Bit(uint16_t reg, uint16_t value)
   buf[2] = (uint8_t)(value >> 8);
   buf[3] = (uint8_t)(value);
 
-  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
+  i2c_master_write_to_device(port,address, buf, sizeof(buf), pdMS_TO_TICKS(1000));
 }
 
 // Write a 32-bit register
@@ -204,7 +195,7 @@ void VL53L1X::writeReg32Bit(uint16_t reg, uint32_t value)
   buf[3] = (uint8_t)(value >> 16);
   buf[4] = (uint8_t)(value >> 8);
   buf[5] = (uint8_t)(value);
-  i2c_master_transmit(bus, buf, sizeof(buf), pdMS_TO_TICKS(1000));
+  i2c_master_write_to_device(port,address, buf, sizeof(buf), pdMS_TO_TICKS(1000));
 
 }
 
@@ -216,7 +207,7 @@ uint8_t VL53L1X::readReg(regAddr reg)
   reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
     // レジスタアドレス送信
-    esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    esp_err_t err = i2c_master_write_to_device(port,address, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
     last_status = err;
     if (err != ESP_OK) {
         return 0; // 失敗時は0を返す（必要ならエラー処理）
@@ -224,7 +215,7 @@ uint8_t VL53L1X::readReg(regAddr reg)
 
     // データ受信（1バイト）
     uint8_t value = 0;
-    err = i2c_master_receive(bus, &value, 1, pdMS_TO_TICKS(1000));
+    err = i2c_master_read_from_device(port,address, &value, 1, pdMS_TO_TICKS(1000));
     last_status = err;
 
     return value;
@@ -238,7 +229,7 @@ uint16_t VL53L1X::readReg16Bit(uint16_t reg)
     reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
     // レジスタアドレス送信
-    esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    esp_err_t err = i2c_master_write_to_device(port,address, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
     last_status = err;
     if (err != ESP_OK) {
         return 0; // 失敗時は0を返す（必要ならエラー処理）
@@ -246,7 +237,7 @@ uint16_t VL53L1X::readReg16Bit(uint16_t reg)
 
     // データ受信（2バイト）
     uint8_t data[2] = {0};
-    err = i2c_master_receive(bus, data, 2, pdMS_TO_TICKS(1000));
+    err = i2c_master_read_from_device(port,address, data, 2, pdMS_TO_TICKS(1000));
     last_status = err;
     if (err != ESP_OK) {
         return 0;
@@ -266,7 +257,7 @@ uint32_t VL53L1X::readReg32Bit(uint16_t reg)
   reg_buf[1] = (uint8_t)(reg);      // reg low byte
 
     // レジスタアドレス送信
-  esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+  esp_err_t err = i2c_master_write_to_device(port,address, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
   last_status = err;
   if (err != ESP_OK) {
         return 0; // 失敗時は0を返す（必要ならエラー処理）
@@ -274,7 +265,7 @@ uint32_t VL53L1X::readReg32Bit(uint16_t reg)
 
     // データ受信（2バイト）
   uint8_t data[4] = {0};
-  err = i2c_master_receive(bus, data, 4, pdMS_TO_TICKS(1000));
+  err = i2c_master_read_from_device(port,address, data, 4, pdMS_TO_TICKS(1000));
   last_status = err;
   if (err != ESP_OK) {
         return 0;
@@ -716,7 +707,7 @@ void VL53L1X::readResults()
     reg_buf[1] = (uint8_t)(RESULT__RANGE_STATUS);      // low byte
 
     // まずレジスタアドレスを送信
-    err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
+    err = i2c_master_write_to_device(port,address, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(1000));
     last_status = err;
     if (err != ESP_OK) {
         ESP_LOGE("VL53L1X", "Failed to write reg addr: %s", esp_err_to_name(err));
@@ -725,7 +716,7 @@ void VL53L1X::readResults()
 
     // 17バイト受信
     uint8_t data[17];
-    err = i2c_master_receive(bus, data, sizeof(data), pdMS_TO_TICKS(1000));
+    err = i2c_master_read_from_device(port,address, data, sizeof(data), pdMS_TO_TICKS(1000));
     last_status = err;
     if (err != ESP_OK) {
         ESP_LOGE("VL53L1X", "Failed to read result data: %s", esp_err_to_name(err));
