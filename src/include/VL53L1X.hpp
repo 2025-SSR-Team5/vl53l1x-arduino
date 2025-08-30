@@ -1275,7 +1275,7 @@ class VL53L1X
     void setBus(i2c_master_bus_handle_t  * _i2cbus);
     i2c_master_dev_handle_t  getBus() { return bus; }
 
-    void setAddress(uint8_t new_addr);
+    void setAddress(uint8_t new_addr, i2c_master_bus_handle_t * _i2cbus);
     uint8_t getAddress() { return address; }
 
     bool init(bool io_2v8 = true);

@@ -38,10 +38,16 @@ void VL53L1X::setBus(i2c_master_bus_handle_t  * _i2cbus){
 
 // Public Methods //////////////////////////////////////////////////////////////
 
-void VL53L1X::setAddress(uint8_t new_addr)
+void VL53L1X::setAddress(uint8_t new_addr,i2c_master_bus_handle_t * _i2cbus)
 {
   writeReg(I2C_SLAVE__DEVICE_ADDRESS, new_addr & 0x7F);
   address = new_addr;
+  if (bus) {
+    i2c_master_bus_rm_device(bus); // 古いハンドルを削除
+    bus = nullptr;
+  }
+  setBus(_i2cbus);
+
 }
 
 // Initialize sensor using settings taken mostly from VL53L1_DataInit() and
