@@ -15,7 +15,7 @@
 VL53L1X::VL53L1X()
   : bus(nullptr)
   , address(AddressDefault)
-  , io_timeout(0) // no timeout
+  , io_timeout(200) // default 200 ms
   , did_timeout(false)
   , calibrated(false)
   , saved_vhv_init(0)
@@ -36,28 +36,32 @@ void VL53L1X::setBus(i2c_master_bus_handle_t  * _i2cbus){
 
 }
 
+void VL53L1X::removeBus()
+{
+    if (bus != NULL) {
+        if(i2c_master_bus_rm_device(bus) != ESP_OK) {
+            ESP_LOGE("VL53L1X","Failed to remove I2C device from bus with address 0x%02X", address);
+        }
+
+        bus = NULL;
+        i2cbus = NULL;
+    }else{
+        ESP_LOGW("VL53L1X","Bus is already removed");
+    }
+}
+
 // Public Methods //////////////////////////////////////////////////////////////
 
 void VL53L1X::setAddress(uint8_t new_addr,i2c_master_bus_handle_t * _i2cbus)
 {
   writeReg(I2C_SLAVE__DEVICE_ADDRESS, new_addr & 0x7F);
   address = new_addr;
-<<<<<<< HEAD
   if (bus) {
     i2c_master_bus_rm_device(bus); // 古いハンドルを削除
     bus = nullptr;
   }
   setBus(_i2cbus);
 
-=======
-  i2c_master_bus_rm_device(bus);
-  i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = address,
-            .scl_speed_hz = 400000,
-        };
-  i2c_master_bus_add_device(*i2cbus, &dev_cfg, &bus);
->>>>>>> 94e5ec3d864cc810263d0c83506da5b1a0a0502c
 }
 
 // Initialize sensor using settings taken mostly from VL53L1_DataInit() and
@@ -67,7 +71,11 @@ void VL53L1X::setAddress(uint8_t new_addr,i2c_master_bus_handle_t * _i2cbus)
 bool VL53L1X::init(bool io_2v8)
 {
   // check model ID and module type registers (values specified in datasheet)
-  if (readReg16Bit(IDENTIFICATION__MODEL_ID) != 0xEACC) { return false; }
+  if (readReg16Bit(IDENTIFICATION__MODEL_ID) != 0xEACC) {
+    ESP_LOGE("VL53L1X","Failed to find expected ID register value. ID=0x%04X",
+      readReg16Bit(IDENTIFICATION__MODEL_ID));
+    return false; 
+  }
 
   // VL53L1_software_reset() begin
 
@@ -89,6 +97,7 @@ bool VL53L1X::init(bool io_2v8)
     if (checkTimeoutExpired())
     {
       did_timeout = true;
+      ESP_LOGE("VL53L1X","Timed out waiting for VL53L1X boot.");
       return false;
     }
   }
@@ -257,6 +266,7 @@ uint16_t VL53L1X::readReg16Bit(uint16_t reg)
     esp_err_t err = i2c_master_transmit(bus, reg_buf, sizeof(reg_buf), pdMS_TO_TICKS(100));
     last_status = err;
     if (err != ESP_OK) {
+        printf("Failed to write register address 0x%04X with error code %X\n", reg, err);
         return 0; // 失敗時は0を返す（必要ならエラー処理）
     }
 
@@ -604,7 +614,10 @@ uint16_t VL53L1X::read(bool blocking)
     }
   }
 
-  readResults();
+  if(!readResults())
+  {
+      return 0;
+  }
 
   if (!calibrated)
   {
@@ -722,7 +735,7 @@ void VL53L1X::setupManualCalibration()
 }
 
 // read measurement results into buffer
-void VL53L1X::readResults()
+bool VL53L1X::readResults()
 {
     esp_err_t err;
 
@@ -736,7 +749,7 @@ void VL53L1X::readResults()
     last_status = err;
     if (err != ESP_OK) {
         ESP_LOGE("VL53L1X", "Failed to write reg addr: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
 
     // 17バイト受信
@@ -745,7 +758,7 @@ void VL53L1X::readResults()
     last_status = err;
     if (err != ESP_OK) {
         ESP_LOGE("VL53L1X", "Failed to read result data: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
 
     // デコード (Arduino版と同じ順序)
@@ -770,6 +783,8 @@ void VL53L1X::readResults()
 
     results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0  = (uint16_t)data[15] << 8;
     results.peak_signal_count_rate_crosstalk_corrected_mcps_sd0 |= (uint16_t)data[16];
+
+    return true;
 }
 
 // perform Dynamic SPAD Selection calculation/update

@@ -1273,9 +1273,11 @@ class VL53L1X
     VL53L1X();
 
     void setBus(i2c_master_bus_handle_t  * _i2cbus);
+    void removeBus();
     i2c_master_dev_handle_t  getBus() { return bus; }
 
     void setAddress(uint8_t new_addr, i2c_master_bus_handle_t * _i2cbus);
+    void setinternalAddress(uint8_t new_addr) { address = new_addr; }
     uint8_t getAddress() { return address; }
 
     bool init(bool io_2v8 = true);
@@ -1383,7 +1385,7 @@ class VL53L1X
     bool checkTimeoutExpired() {return (io_timeout > 0) && ((uint32_t)((esp_timer_get_time()/1000) - timeout_start_ms) > io_timeout); }
 
     void setupManualCalibration();
-    void readResults();
+    bool readResults();
     void updateDSS();
     void getRangingData();
 
